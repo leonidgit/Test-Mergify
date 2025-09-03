@@ -1,0 +1,211 @@
+name: Jira Integration
+
+on:
+  pull_request:
+    types: [closed]
+  push:
+    branches: [custom-qa, custom, release]
+
+jobs:
+  update-jira:
+    if: github.event.pull_request.merged == true || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract Jira ticket from commits
+        id: extract-ticket
+        run: |
+          # Get commit messages from the PR or latest push
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            COMMITS=$(git log --pretty=format:"%s" ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }})
+          else
+            COMMITS=$(git log --pretty=format:"%s" -1)
+          fi
+          
+          echo "Commit messages:"
+          echo "$COMMITS"
+          
+          # Extract Jira ticket keys (format: ABC-123, PROJ-456, etc.)
+          JIRA_TICKETS=$(echo "$COMMITS" | grep -oE '[A-Z]{2,10}-[0-9]+' | sort -u || true)
+          
+          if [ -n "$JIRA_TICKETS" ]; then
+            echo "Found Jira tickets: $JIRA_TICKETS"
+            echo "tickets<<EOF" >> $GITHUB_OUTPUT
+            echo "$JIRA_TICKETS" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "No Jira tickets found in commit messages"
+            echo "tickets=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update Jira tickets
+        if: steps.extract-ticket.outputs.tickets != ''
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        run: |
+          # Function to update Jira ticket
+          update_jira_ticket() {
+            local ticket_key=$1
+            local transition_id=$2
+            local comment=$3
+            
+            echo "Updating ticket: $ticket_key"
+            
+            # Get current ticket status
+            response=$(curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+              -H "Accept: application/json" \
+              "$JIRA_BASE_URL/rest/api/3/issue/$ticket_key")
+            
+            if echo "$response" | jq -e '.key' > /dev/null; then
+              echo "Ticket $ticket_key found"
+              
+              # Add comment about the merge
+              curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+                -X POST \
+                -H "Accept: application/json" \
+                -H "Content-Type: application/json" \
+                "$JIRA_BASE_URL/rest/api/3/issue/$ticket_key/comment" \
+                -d "{
+                  \"body\": {
+                    \"type\": \"doc\",
+                    \"version\": 1,
+                    \"content\": [
+                      {
+                        \"type\": \"paragraph\",
+                        \"content\": [
+                          {
+                            \"type\": \"text\",
+                            \"text\": \"$comment\"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }"
+              
+              # Get available transitions
+              transitions=$(curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+                -H "Accept: application/json" \
+                "$JIRA_BASE_URL/rest/api/3/issue/$ticket_key/transitions")
+              
+              echo "Available transitions:"
+              echo "$transitions" | jq -r '.transitions[] | "\(.id): \(.name)"'
+              
+              # Determine target status based on branch
+              TARGET_BRANCH="${{ github.ref_name }}"
+              case "$TARGET_BRANCH" in
+                "custom-qa")
+                  TARGET_STATUS="Fixed in QA"
+                  ;;
+                "custom")
+                  TARGET_STATUS="Fixed in UAT"
+                  ;;
+                "release")
+                  TARGET_STATUS="Fixed in Stage"
+                  ;;
+                *)
+                  TARGET_STATUS="Done"
+                  ;;
+              esac
+              
+              echo "Target branch: $TARGET_BRANCH"
+              echo "Target status: $TARGET_STATUS"
+              
+              # Find transition for target status
+              target_transition=$(echo "$transitions" | jq -r --arg status "$TARGET_STATUS" '.transitions[] | select(.name == $status) | .id' | head -1)
+              
+              # If exact match not found, try partial match
+              if [ -z "$target_transition" ]; then
+                target_transition=$(echo "$transitions" | jq -r --arg status "$TARGET_STATUS" '.transitions[] | select(.name | contains($status)) | .id' | head -1)
+              fi
+              
+              # If still not found, fallback to Done/Resolved
+              if [ -z "$target_transition" ]; then
+                target_transition=$(echo "$transitions" | jq -r '.transitions[] | select(.name | test("Done|Resolved|Closed"; "i")) | .id' | head -1)
+                TARGET_STATUS="Done"
+              fi
+              
+              if [ -n "$target_transition" ]; then
+                echo "Transitioning ticket $ticket_key to '$TARGET_STATUS' (transition ID: $target_transition)"
+                curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+                  -X POST \
+                  -H "Accept: application/json" \
+                  -H "Content-Type: application/json" \
+                  "$JIRA_BASE_URL/rest/api/3/issue/$ticket_key/transitions" \
+                  -d "{
+                    \"transition\": {
+                      \"id\": \"$target_transition\"
+                    }
+                  }"
+                echo "✅ Ticket $ticket_key transitioned to '$TARGET_STATUS'"
+              else
+                echo "⚠️ No transition found for '$TARGET_STATUS' for ticket $ticket_key"
+              fi
+            else
+              echo "❌ Ticket $ticket_key not found or access denied"
+            fi
+          }
+          
+          # Process each ticket
+          while IFS= read -r ticket; do
+            if [ -n "$ticket" ]; then
+              PR_URL="${{ github.event.pull_request.html_url || github.event.head_commit.url }}"
+              TARGET_BRANCH="${{ github.ref_name }}"
+              
+              # Create branch-specific comment
+              case "$TARGET_BRANCH" in
+                "custom-qa")
+                  DEPLOYMENT_ENV="QA Environment"
+                  ;;
+                "custom")
+                  DEPLOYMENT_ENV="UAT Environment"
+                  ;;
+                "release")
+                  DEPLOYMENT_ENV="Stage Environment"
+                  ;;
+                *)
+                  DEPLOYMENT_ENV="Production"
+                  ;;
+              esac
+              
+              COMMENT="🚀 Code deployed to $DEPLOYMENT_ENV via GitHub PR: $PR_URL"
+              update_jira_ticket "$ticket" "" "$COMMENT"
+            fi
+          done <<< "${{ steps.extract-ticket.outputs.tickets }}"
+
+      - name: Summary
+        if: steps.extract-ticket.outputs.tickets != ''
+        run: |
+          TARGET_BRANCH="${{ github.ref_name }}"
+          case "$TARGET_BRANCH" in
+            "custom-qa")
+              STATUS="Fixed in QA"
+              ENV="QA Environment"
+              ;;
+            "custom")
+              STATUS="Fixed in UAT"
+              ENV="UAT Environment"
+              ;;
+            "release")
+              STATUS="Fixed in Stage"
+              ENV="Stage Environment"
+              ;;
+            *)
+              STATUS="Done"
+              ENV="Production"
+              ;;
+          esac
+          
+          echo "## 🎫 Jira Integration Summary" >> $GITHUB_STEP_SUMMARY
+          echo "**Target Branch:** $TARGET_BRANCH" >> $GITHUB_STEP_SUMMARY
+          echo "**Deployment:** $ENV" >> $GITHUB_STEP_SUMMARY
+          echo "**Jira Status:** $STATUS" >> $GITHUB_STEP_SUMMARY
+          echo "**Updated Tickets:** ${{ steps.extract-ticket.outputs.tickets }}" >> $GITHUB_STEP_SUMMARY
+          echo "**PR/Commit:** ${{ github.event.pull_request.html_url || github.event.head_commit.url }}" >> $GITHUB_STEP_SUMMARY

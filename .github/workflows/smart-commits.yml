@@ -1,0 +1,317 @@
+name: Smart Commits - Advanced Jira Integration
+
+on:
+  pull_request:
+    types: [closed]
+  push:
+    branches: [main, master, develop]
+
+jobs:
+  process-smart-commits:
+    if: github.event.pull_request.merged == true || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Parse Smart Commits
+        id: parse-commits
+        run: |
+          # Get commit messages from the PR or latest push
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            COMMITS=$(git log --pretty=format:"%s%n%b" ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }})
+          else
+            COMMITS=$(git log --pretty=format:"%s%n%b" -1)
+          fi
+          
+          echo "Processing commit messages for smart commit syntax..."
+          
+          # Create a temporary file for processing
+          echo "$COMMITS" > commits.tmp
+          
+          # Extract smart commit commands
+          python3 << 'EOF'
+          import re
+          import json
+          import sys
+          
+          # Read commits
+          with open('commits.tmp', 'r') as f:
+              commits_text = f.read()
+          
+          # Smart commit patterns
+          ticket_pattern = r'([A-Z]{2,10}-[0-9]+)'
+          time_pattern = r'#time\s+(\d+[hdm]?)'
+          comment_pattern = r'#comment\s+"([^"]+)"'
+          transition_patterns = {
+              'resolve': r'#resolve|#fixed|#done',
+              'close': r'#close|#closed',
+              'review': r'#review|#testing',
+              'progress': r'#progress|#start'
+          }
+          
+          results = {}
+          
+          # Find all ticket references
+          tickets = re.findall(ticket_pattern, commits_text, re.IGNORECASE)
+          
+          for ticket in set(tickets):
+              ticket_data = {
+                  'ticket': ticket,
+                  'time': None,
+                  'comment': None,
+                  'transition': None,
+                  'commands': []
+              }
+              
+              # Find lines containing this ticket
+              ticket_lines = [line for line in commits_text.split('\n') if ticket in line]
+              ticket_context = ' '.join(ticket_lines)
+              
+              # Extract time logging
+              time_match = re.search(time_pattern, ticket_context, re.IGNORECASE)
+              if time_match:
+                  ticket_data['time'] = time_match.group(1)
+                  ticket_data['commands'].append(f"time:{time_match.group(1)}")
+              
+              # Extract comments
+              comment_match = re.search(comment_pattern, ticket_context, re.IGNORECASE)
+              if comment_match:
+                  ticket_data['comment'] = comment_match.group(1)
+                  ticket_data['commands'].append(f"comment:{comment_match.group(1)}")
+              
+              # Extract transitions
+              for transition_name, pattern in transition_patterns.items():
+                  if re.search(pattern, ticket_context, re.IGNORECASE):
+                      ticket_data['transition'] = transition_name
+                      ticket_data['commands'].append(f"transition:{transition_name}")
+                      break
+              
+              results[ticket] = ticket_data
+          
+          # Output results
+          if results:
+              print(f"Found {len(results)} tickets with smart commit commands")
+              with open('smart_commits.json', 'w') as f:
+                  json.dump(results, f, indent=2)
+          else:
+              print("No smart commit commands found")
+              with open('smart_commits.json', 'w') as f:
+                  json.dump({}, f)
+          EOF
+          
+          # Set outputs
+          if [ -f smart_commits.json ] && [ -s smart_commits.json ] && [ "$(cat smart_commits.json)" != "{}" ]; then
+            echo "found_tickets=true" >> $GITHUB_OUTPUT
+            echo "smart_commits<<EOF" >> $GITHUB_OUTPUT
+            cat smart_commits.json >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "found_tickets=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Execute Smart Commit Commands
+        if: steps.parse-commits.outputs.found_tickets == 'true'
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        run: |
+          # Process smart commits JSON
+          python3 << 'EOF'
+          import json
+          import requests
+          import os
+          from requests.auth import HTTPBasicAuth
+          import sys
+          
+          # Load smart commits
+          try:
+              with open('smart_commits.json', 'r') as f:
+                  smart_commits = json.load(f)
+          except:
+              print("No smart commits to process")
+              sys.exit(0)
+          
+          # Jira API setup
+          base_url = os.environ.get('JIRA_BASE_URL')
+          email = os.environ.get('JIRA_USER_EMAIL') 
+          token = os.environ.get('JIRA_API_TOKEN')
+          
+          if not all([base_url, email, token]):
+              print("Missing Jira credentials")
+              sys.exit(1)
+              
+          auth = HTTPBasicAuth(email, token)
+          headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
+          
+          # GitHub context
+          pr_url = os.environ.get('GITHUB_SERVER_URL', 'https://github.com') + '/' + os.environ.get('GITHUB_REPOSITORY', '') + '/pull/' + os.environ.get('GITHUB_EVENT_NUMBER', '')
+          
+          for ticket_key, data in smart_commits.items():
+              print(f"\n🎫 Processing ticket: {ticket_key}")
+              
+              try:
+                  # Verify ticket exists
+                  response = requests.get(f"{base_url}/rest/api/3/issue/{ticket_key}", auth=auth, headers=headers)
+                  
+                  if response.status_code != 200:
+                      print(f"❌ Ticket {ticket_key} not found or access denied")
+                      continue
+                  
+                  # Add comment
+                  comment_text = data.get('comment', f"🚀 Smart commit processed from GitHub PR: {pr_url}")
+                  if data.get('time'):
+                      comment_text += f"\n⏱️ Time logged: {data['time']}"
+                  if data.get('commands'):
+                      comment_text += f"\n🤖 Commands: {', '.join(data['commands'])}"
+                  
+                  comment_payload = {
+                      "body": {
+                          "type": "doc",
+                          "version": 1,
+                          "content": [{
+                              "type": "paragraph",
+                              "content": [{
+                                  "type": "text", 
+                                  "text": comment_text
+                              }]
+                          }]
+                      }
+                  }
+                  
+                  # Add comment
+                  comment_response = requests.post(
+                      f"{base_url}/rest/api/3/issue/{ticket_key}/comment",
+                      auth=auth,
+                      headers=headers,
+                      json=comment_payload
+                  )
+                  
+                  if comment_response.status_code in [200, 201]:
+                      print(f"✅ Added comment to {ticket_key}")
+                  else:
+                      print(f"⚠️ Failed to add comment to {ticket_key}: {comment_response.text}")
+                  
+                  # Log work time
+                  if data.get('time'):
+                      time_value = data['time']
+                      # Convert time format (e.g., "2h", "30m", "1d")
+                      time_seconds = 0
+                      if 'h' in time_value:
+                          time_seconds = int(time_value.replace('h', '')) * 3600
+                      elif 'm' in time_value:
+                          time_seconds = int(time_value.replace('m', '')) * 60
+                      elif 'd' in time_value:
+                          time_seconds = int(time_value.replace('d', '')) * 86400
+                      else:
+                          time_seconds = int(time_value) * 3600  # Default to hours
+                      
+                      worklog_payload = {
+                          "comment": {
+                              "type": "doc",
+                              "version": 1,
+                              "content": [{
+                                  "type": "paragraph",
+                                  "content": [{
+                                      "type": "text",
+                                      "text": f"Smart commit from GitHub: {data.get('comment', 'Development work')}"
+                                  }]
+                              }]
+                          },
+                          "timeSpentSeconds": time_seconds
+                      }
+                      
+                      worklog_response = requests.post(
+                          f"{base_url}/rest/api/3/issue/{ticket_key}/worklog",
+                          auth=auth,
+                          headers=headers,
+                          json=worklog_payload
+                      )
+                      
+                      if worklog_response.status_code in [200, 201]:
+                          print(f"⏱️ Logged {time_value} for {ticket_key}")
+                      else:
+                          print(f"⚠️ Failed to log time for {ticket_key}")
+                  
+                  # Handle transitions
+                  if data.get('transition'):
+                      # Get available transitions
+                      transitions_response = requests.get(
+                          f"{base_url}/rest/api/3/issue/{ticket_key}/transitions",
+                          auth=auth,
+                          headers=headers
+                      )
+                      
+                      if transitions_response.status_code == 200:
+                          transitions = transitions_response.json().get('transitions', [])
+                          
+                          # Map transition commands to actual transition names
+                          transition_mapping = {
+                              'resolve': ['Done', 'Resolved', 'Fixed', 'Complete'],
+                              'close': ['Closed', 'Done', 'Resolved'],
+                              'review': ['In Review', 'Code Review', 'Testing'],
+                              'progress': ['In Progress', 'In Development', 'Started']
+                          }
+                          
+                          target_transitions = transition_mapping.get(data['transition'], [])
+                          
+                          # Find matching transition
+                          transition_id = None
+                          for transition in transitions:
+                              if any(target.lower() in transition['name'].lower() for target in target_transitions):
+                                  transition_id = transition['id']
+                                  break
+                          
+                          if transition_id:
+                              transition_payload = {"transition": {"id": transition_id}}
+                              
+                              transition_response = requests.post(
+                                  f"{base_url}/rest/api/3/issue/{ticket_key}/transitions",
+                                  auth=auth,
+                                  headers=headers,
+                                  json=transition_payload
+                              )
+                              
+                              if transition_response.status_code in [200, 204]:
+                                  print(f"🔄 Transitioned {ticket_key} to {data['transition']}")
+                              else:
+                                  print(f"⚠️ Failed to transition {ticket_key}")
+                          else:
+                              print(f"⚠️ No matching transition found for {ticket_key}")
+                      
+              except Exception as e:
+                  print(f"❌ Error processing {ticket_key}: {str(e)}")
+          
+          print("\n✨ Smart commit processing completed")
+          EOF
+
+      - name: Summary Report
+        if: steps.parse-commits.outputs.found_tickets == 'true'
+        run: |
+          echo "## 🤖 Smart Commits Summary" >> $GITHUB_STEP_SUMMARY
+          echo "Successfully processed Jira smart commits" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          python3 << 'EOF'
+          import json
+          import os
+          
+          try:
+              with open('smart_commits.json', 'r') as f:
+                  smart_commits = json.load(f)
+              
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+                  f.write("| Ticket | Commands | Status |\n")
+                  f.write("|--------|----------|--------|\n")
+                  
+                  for ticket, data in smart_commits.items():
+                      commands = ', '.join(data.get('commands', ['basic update']))
+                      f.write(f"| {ticket} | {commands} | ✅ Processed |\n")
+                  
+                  f.write(f"\n**Total tickets processed:** {len(smart_commits)}\n")
+          except:
+              pass
+          EOF
