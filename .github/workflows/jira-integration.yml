@@ -206,9 +206,7 @@ jobs:
               
               COMMENT="🚀 Code deployed to $DEPLOYMENT_ENV via GitHub PR: $PR_URL"
               if [ -n "$STATUS_NOTE" ]; then
-                COMMENT="$COMMENT
-
-$STATUS_NOTE"
+                COMMENT="$COMMENT\n\n$STATUS_NOTE"
               fi
               update_jira_ticket "$ticket" "" "$COMMENT"
             fi
