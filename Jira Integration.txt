@@ -1,1 +1,1 @@
-this is Jira Integration Test.
+New updates: this is Jira Integration Test.
