@@ -100,41 +100,58 @@ jobs:
               
               # Determine target status based on branch
               TARGET_BRANCH="${{ github.ref_name }}"
+              echo "Target branch: $TARGET_BRANCH"
+              
+              # Define multiple possible transition names for each branch
               case "$TARGET_BRANCH" in
                 "custom-qa")
-                  TARGET_STATUS="Fixed in QA"
+                  POSSIBLE_TRANSITIONS="Fixed in QA|QA|Testing|Test"
+                  PREFERRED_STATUS="Fixed in QA"
                   ;;
                 "custom")
-                  TARGET_STATUS="Fixed in UAT"
+                  POSSIBLE_TRANSITIONS="Fixed in UAT|UAT|User Acceptance|Acceptance"
+                  PREFERRED_STATUS="Fixed in UAT"
                   ;;
                 "release")
-                  TARGET_STATUS="Fixed in Stage"
+                  POSSIBLE_TRANSITIONS="Fixed in Stage|Stage|Ready for Release|READY FOR RELEASE|Released|Deploy"
+                  PREFERRED_STATUS="Ready for Release"
                   ;;
                 *)
-                  TARGET_STATUS="Done"
+                  POSSIBLE_TRANSITIONS="Done|Resolved|Closed|Complete"
+                  PREFERRED_STATUS="Done"
                   ;;
               esac
               
-              echo "Target branch: $TARGET_BRANCH"
-              echo "Target status: $TARGET_STATUS"
+              echo "Looking for transitions matching: $POSSIBLE_TRANSITIONS"
               
-              # Find transition for target status
-              target_transition=$(echo "$transitions" | jq -r --arg status "$TARGET_STATUS" '.transitions[] | select(.name == $status) | .id' | head -1)
+              # Find transition using flexible matching
+              target_transition=$(echo "$transitions" | jq -r --arg patterns "$POSSIBLE_TRANSITIONS" '
+                .transitions[] | 
+                select(.name | test($patterns; "i")) | 
+                .id' | head -1)
               
-              # If exact match not found, try partial match
-              if [ -z "$target_transition" ]; then
-                target_transition=$(echo "$transitions" | jq -r --arg status "$TARGET_STATUS" '.transitions[] | select(.name | contains($status)) | .id' | head -1)
-              fi
-              
-              # If still not found, fallback to Done/Resolved
-              if [ -z "$target_transition" ]; then
-                target_transition=$(echo "$transitions" | jq -r '.transitions[] | select(.name | test("Done|Resolved|Closed"; "i")) | .id' | head -1)
-                TARGET_STATUS="Done"
+              # Get the actual transition name that was found
+              if [ -n "$target_transition" ]; then
+                ACTUAL_STATUS=$(echo "$transitions" | jq -r --arg id "$target_transition" '
+                  .transitions[] | 
+                  select(.id == $id) | 
+                  .name')
+                echo "Found matching transition: $ACTUAL_STATUS (ID: $target_transition)"
+              else
+                echo "No matching transitions found, will try first available transition"
+                # Get first available transition as fallback
+                target_transition=$(echo "$transitions" | jq -r '.transitions[0].id' 2>/dev/null)
+                if [ -n "$target_transition" ] && [ "$target_transition" != "null" ]; then
+                  ACTUAL_STATUS=$(echo "$transitions" | jq -r --arg id "$target_transition" '.transitions[] | select(.id == $id) | .name')
+                  echo "Using fallback transition: $ACTUAL_STATUS (ID: $target_transition)"
+                else
+                  echo "No transitions available"
+                fi
               fi
               
               if [ -n "$target_transition" ]; then
-                echo "Transitioning ticket $ticket_key to '$TARGET_STATUS' (transition ID: $target_transition)"
-                curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+                echo "Transitioning ticket $ticket_key to '$ACTUAL_STATUS' (transition ID: $target_transition)"
+                transition_result=$(curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
                   -X POST \
                   -H "Accept: application/json" \
                   -H "Content-Type: application/json" \
@@ -143,10 +160,15 @@ jobs:
                     \"transition\": {
                       \"id\": \"$target_transition\"
                     }
-                  }"
-                echo "✅ Ticket $ticket_key transitioned to '$TARGET_STATUS'"
+                  }")
+                
+                if [ -z "$transition_result" ] || [[ "$transition_result" != *"error"* ]]; then
+                  echo "✅ Ticket $ticket_key transitioned to '$ACTUAL_STATUS'"
+                else
+                  echo "❌ Transition failed: $transition_result"
+                fi
               else
-                echo "⚠️ No transition found for '$TARGET_STATUS' for ticket $ticket_key"
+                echo "⚠️ No valid transitions available for ticket $ticket_key"
               fi
             else
               echo "❌ Ticket $ticket_key not found or access denied"
