@@ -113,8 +113,8 @@ jobs:
                   PREFERRED_STATUS="Fixed in UAT"
                   ;;
                 "release")
-                  POSSIBLE_TRANSITIONS="Fixed in Stage|Stage|Ready for Release|READY FOR RELEASE|Released|Deploy"
-                  PREFERRED_STATUS="Ready for Release"
+                  POSSIBLE_TRANSITIONS="Fixed in Stage|FIXED IN STAGE|Stage|Ready for Release|READY FOR RELEASE|Released|Deploy"
+                  PREFERRED_STATUS="Fixed in Stage"
                   ;;
                 *)
                   POSSIBLE_TRANSITIONS="Done|Resolved|Closed|Complete"
@@ -137,6 +137,12 @@ jobs:
                   select(.id == $id) | 
                   .name')
                 echo "Found matching transition: $ACTUAL_STATUS (ID: $target_transition)"
+                
+                # Check if we got the preferred status
+                if [ "$ACTUAL_STATUS" != "$PREFERRED_STATUS" ]; then
+                  echo "⚠️ Note: Preferred status '$PREFERRED_STATUS' not available, using '$ACTUAL_STATUS'"
+                  STATUS_NOTE="Note: Intended for '$PREFERRED_STATUS' status, but transitioned to '$ACTUAL_STATUS' (closest available)"
+                fi
               else
                 echo "No matching transitions found, will try first available transition"
                 # Get first available transition as fallback
@@ -144,6 +150,7 @@ jobs:
                 if [ -n "$target_transition" ] && [ "$target_transition" != "null" ]; then
                   ACTUAL_STATUS=$(echo "$transitions" | jq -r --arg id "$target_transition" '.transitions[] | select(.id == $id) | .name')
                   echo "Using fallback transition: $ACTUAL_STATUS (ID: $target_transition)"
+                  STATUS_NOTE="Note: Intended for '$PREFERRED_STATUS' status, but used fallback transition '$ACTUAL_STATUS'"
                 else
                   echo "No transitions available"
                 fi
@@ -198,6 +205,11 @@ jobs:
               esac
               
               COMMENT="🚀 Code deployed to $DEPLOYMENT_ENV via GitHub PR: $PR_URL"
+              if [ -n "$STATUS_NOTE" ]; then
+                COMMENT="$COMMENT
+
+$STATUS_NOTE"
+              fi
               update_jira_ticket "$ticket" "" "$COMMENT"
             fi
           done <<< "${{ steps.extract-ticket.outputs.tickets }}"
