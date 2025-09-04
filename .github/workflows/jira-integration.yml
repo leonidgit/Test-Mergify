@@ -102,23 +102,23 @@ jobs:
               TARGET_BRANCH="${{ github.ref_name }}"
               echo "Target branch: $TARGET_BRANCH"
               
-              # Define multiple possible transition names for each branch
+              # Define transitions based on actual TPL project Jira workflow
               case "$TARGET_BRANCH" in
                 "custom-qa")
-                  POSSIBLE_TRANSITIONS="Fixed in QA|QA|Testing|Test"
-                  PREFERRED_STATUS="Fixed in QA"
+                  POSSIBLE_TRANSITIONS="READY FOR RELEASE|admin"
+                  PREFERRED_STATUS="READY FOR RELEASE"
                   ;;
                 "custom")
-                  POSSIBLE_TRANSITIONS="Fixed in UAT|UAT|User Acceptance|Acceptance"
-                  PREFERRED_STATUS="Fixed in UAT"
+                  POSSIBLE_TRANSITIONS="READY FOR RELEASE|admin"
+                  PREFERRED_STATUS="READY FOR RELEASE"
                   ;;
                 "release")
-                  POSSIBLE_TRANSITIONS="Fixed in Stage|FIXED IN STAGE|Stage|Ready for Release|READY FOR RELEASE|Released|Deploy"
-                  PREFERRED_STATUS="Fixed in Stage"
+                  POSSIBLE_TRANSITIONS="READY FOR RELEASE|admin"
+                  PREFERRED_STATUS="READY FOR RELEASE"
                   ;;
                 *)
-                  POSSIBLE_TRANSITIONS="Done|Resolved|Closed|Complete"
-                  PREFERRED_STATUS="Done"
+                  POSSIBLE_TRANSITIONS="READY FOR RELEASE|admin"
+                  PREFERRED_STATUS="READY FOR RELEASE"
                   ;;
               esac
               
