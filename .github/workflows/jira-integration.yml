@@ -30,8 +30,8 @@ jobs:
           echo "Commit messages:"
           echo "$COMMITS"
           
-          # Extract Jira ticket keys (format: ABC-123, PROJ-456, etc.)
-          JIRA_TICKETS=$(echo "$COMMITS" | grep -oE '[A-Z]{2,10}-[0-9]+' | sort -u || true)
+          # Extract Jira ticket keys (format: NOOSH-123, NO-456, etc.)
+          JIRA_TICKETS=$(echo "$COMMITS" | grep -oE '(NOOSH|NO)-[0-9]+' | sort -u || true)
           
           if [ -n "$JIRA_TICKETS" ]; then
             echo "Found Jira tickets: $JIRA_TICKETS"
@@ -102,23 +102,23 @@ jobs:
               TARGET_BRANCH="${{ github.ref_name }}"
               echo "Target branch: $TARGET_BRANCH"
               
-              # Define transitions based on actual TPL project Jira workflow
+              # Define transitions based on Noosh One project Jira workflow
               case "$TARGET_BRANCH" in
                 "custom-qa")
-                  POSSIBLE_TRANSITIONS="READY FOR RELEASE|admin"
-                  PREFERRED_STATUS="READY FOR RELEASE"
+                  POSSIBLE_TRANSITIONS="In Testing|Testing|QA|Ready for Testing|Test"
+                  PREFERRED_STATUS="In Testing"
                   ;;
                 "custom")
-                  POSSIBLE_TRANSITIONS="READY FOR RELEASE|admin"
-                  PREFERRED_STATUS="READY FOR RELEASE"
+                  POSSIBLE_TRANSITIONS="In UAT|UAT|User Acceptance|Ready for UAT|Acceptance"
+                  PREFERRED_STATUS="In UAT"
                   ;;
                 "release")
-                  POSSIBLE_TRANSITIONS="READY FOR RELEASE|admin"
-                  PREFERRED_STATUS="READY FOR RELEASE"
+                  POSSIBLE_TRANSITIONS="Ready for Release|Released|Deploy|Ready to Deploy|Done"
+                  PREFERRED_STATUS="Ready for Release"
                   ;;
                 *)
-                  POSSIBLE_TRANSITIONS="READY FOR RELEASE|admin"
-                  PREFERRED_STATUS="READY FOR RELEASE"
+                  POSSIBLE_TRANSITIONS="Done|Closed|Resolved|Complete"
+                  PREFERRED_STATUS="Done"
                   ;;
               esac
               
@@ -218,15 +218,15 @@ jobs:
           TARGET_BRANCH="${{ github.ref_name }}"
           case "$TARGET_BRANCH" in
             "custom-qa")
-              STATUS="Fixed in QA"
+              STATUS="In Testing"
               ENV="QA Environment"
               ;;
             "custom")
-              STATUS="Fixed in UAT"
+              STATUS="In UAT"
               ENV="UAT Environment"
               ;;
             "release")
-              STATUS="Fixed in Stage"
+              STATUS="Ready for Release"
               ENV="Stage Environment"
               ;;
             *)

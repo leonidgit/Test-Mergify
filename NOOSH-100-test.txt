@@ -1,0 +1,16 @@
+NOOSH-100 Test Integration
+
+This file tests the Noosh One Jira integration workflow.
+
+Features tested:
+- Ticket extraction from commit messages (NOOSH-100)
+- Branch-specific status transitions
+- Automated Jira commenting and status updates
+
+Expected behavior:
+- custom-qa branch → "In Testing" status
+- custom branch → "In UAT" status  
+- release branch → "Ready for Release" status
+
+Test Date: 2025-09-04
+Project: Noosh One
