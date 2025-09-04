@@ -102,22 +102,23 @@ jobs:
               TARGET_BRANCH="${{ github.ref_name }}"
               echo "Target branch: $TARGET_BRANCH"
               
-              # Define multiple possible transition names for each branch
+              # Define transitions based on Noosh One project Jira workflow
+              # These will be updated based on actual workflow discovery
               case "$TARGET_BRANCH" in
                 "custom-qa")
-                  POSSIBLE_TRANSITIONS="Fixed in QA|QA|Testing|Test"
-                  PREFERRED_STATUS="Fixed in QA"
+                  POSSIBLE_TRANSITIONS="Testing|QA|In Progress|To Do|Done|Closed"
+                  PREFERRED_STATUS="Testing"
                   ;;
                 "custom")
-                  POSSIBLE_TRANSITIONS="Fixed in UAT|UAT|User Acceptance|Acceptance"
-                  PREFERRED_STATUS="Fixed in UAT"
+                  POSSIBLE_TRANSITIONS="UAT|User Acceptance|In Progress|To Do|Done|Closed"
+                  PREFERRED_STATUS="UAT"
                   ;;
                 "release")
-                  POSSIBLE_TRANSITIONS="Fixed in Stage|FIXED IN STAGE|Stage|Ready for Release|READY FOR RELEASE|Released|Deploy"
-                  PREFERRED_STATUS="Fixed in Stage"
+                  POSSIBLE_TRANSITIONS="Done|Closed|Released|Deploy|In Progress|To Do"
+                  PREFERRED_STATUS="Done"
                   ;;
                 *)
-                  POSSIBLE_TRANSITIONS="Done|Resolved|Closed|Complete"
+                  POSSIBLE_TRANSITIONS="Done|Closed|Resolved|Complete|In Progress|To Do"
                   PREFERRED_STATUS="Done"
                   ;;
               esac
@@ -218,15 +219,15 @@ jobs:
           TARGET_BRANCH="${{ github.ref_name }}"
           case "$TARGET_BRANCH" in
             "custom-qa")
-              STATUS="Fixed in QA"
+              STATUS="Testing"
               ENV="QA Environment"
               ;;
             "custom")
-              STATUS="Fixed in UAT"
+              STATUS="UAT"
               ENV="UAT Environment"
               ;;
             "release")
-              STATUS="Fixed in Stage"
+              STATUS="Done"
               ENV="Stage Environment"
               ;;
             *)
