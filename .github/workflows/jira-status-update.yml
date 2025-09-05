@@ -32,8 +32,11 @@ jobs:
           
           # Get issue details to check project and workflow
           echo "🔍 Getting issue details for project and workflow validation..."
+          echo "🔍 Using URL: ${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$JIRA_KEY?fields=project,status"
           issue_details=$(curl -s -H "Authorization: Basic ${{ secrets.JIRA_API_TOKEN }}" \
             "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$JIRA_KEY?fields=project,status")
+          
+          echo "🔍 Raw API response: $issue_details"
           
           project_key=$(echo "$issue_details" | jq -r '.fields.project.key')
           current_status=$(echo "$issue_details" | jq -r '.fields.status.name')
