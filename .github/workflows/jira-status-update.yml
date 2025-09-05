@@ -1,0 +1,53 @@
+name: Update Jira Status on PR Merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - custom-qa
+      - custom
+      - release
+
+jobs:
+  update-jira:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract Jira Issue Key
+        id: jira-key
+        run: |
+          JIRA_KEY=$(echo "${{ github.event.pull_request.title }}" | grep -o '[A-Z]\+-[0-9]\+' | head -1)
+          if [ -z "$JIRA_KEY" ]; then
+            JIRA_KEY=$(echo "${{ github.event.pull_request.head.ref }}" | grep -o '[A-Z]\+-[0-9\+' | head -1)
+          fi
+          echo "key=$JIRA_KEY" >> $GITHUB_OUTPUT
+
+      - name: Update Jira Status
+        if: steps.jira-key.outputs.key != ''
+        run: |
+          BRANCH="${{ github.event.pull_request.base.ref }}"
+          JIRA_KEY="${{ steps.jira-key.outputs.key }}"
+          
+          case $BRANCH in
+            "custom-qa")
+              STATUS="FIXED IN QA"
+              ;;
+            "custom")
+              STATUS="FIXED IN UAT"
+              ;;
+            "release")
+              STATUS="FIXED IN STAGE"
+              ;;
+          esac
+          
+          curl -X POST \
+            -H "Authorization: Basic ${{ secrets.JIRA_AUTH_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"transition\": {
+                \"id\": \"$(curl -s -H 'Authorization: Basic ${{ secrets.JIRA_AUTH_TOKEN }}' \
+                  '${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$JIRA_KEY/transitions' | \
+                  jq -r '.transitions[] | select(.name==\"'$STATUS'\") | .id')\"
+              }
+            }" \
+            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$JIRA_KEY/transitions"
