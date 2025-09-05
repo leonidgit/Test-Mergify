@@ -37,12 +37,16 @@ jobs:
           
           echo "🔍 Processing: Branch=$BRANCH, Jira Key=$JIRA_KEY"
           
-          # First, test basic authentication
+          # First, test basic authentication (email:token format for Atlassian Cloud)
           echo "🔐 Testing Jira authentication..."
           echo "🔐 Testing URL: ${{ secrets.JIRA_BASE_URL }}/rest/api/2/myself"
-          auth_response=$(curl -s -H "Authorization: Basic ${{ secrets.JIRA_API_TOKEN }}" \
+          
+          # Create base64 encoded credentials (email:api_token)
+          CREDENTIALS=$(echo -n "${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }}" | base64)
+          
+          auth_response=$(curl -s -H "Authorization: Basic $CREDENTIALS" \
             "${{ secrets.JIRA_BASE_URL }}/rest/api/2/myself")
-          auth_test=$(curl -s -w "%{http_code}" -H "Authorization: Basic ${{ secrets.JIRA_API_TOKEN }}" \
+          auth_test=$(curl -s -w "%{http_code}" -H "Authorization: Basic $CREDENTIALS" \
             "${{ secrets.JIRA_BASE_URL }}/rest/api/2/myself" -o /dev/null)
           echo "🔐 Auth response: $auth_response"
           echo "🔐 Auth HTTP code: $auth_test"
@@ -56,7 +60,7 @@ jobs:
           # Get issue details to check project and workflow
           echo "🔍 Getting issue details for project and workflow validation..."
           echo "🔍 Using URL: ${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$JIRA_KEY?fields=project,status"
-          issue_details=$(curl -s -H "Authorization: Basic ${{ secrets.JIRA_API_TOKEN }}" \
+          issue_details=$(curl -s -H "Authorization: Basic $CREDENTIALS" \
             "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$JIRA_KEY?fields=project,status")
           
           echo "🔍 Raw API response: $issue_details"
@@ -74,7 +78,7 @@ jobs:
           
           # Get workflow information
           echo "🔄 Getting workflow information..."
-          workflow_info=$(curl -s -H "Authorization: Basic ${{ secrets.JIRA_API_TOKEN }}" \
+          workflow_info=$(curl -s -H "Authorization: Basic $CREDENTIALS" \
             "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$JIRA_KEY/transitions")
           
           workflow_name=$(echo "$workflow_info" | jq -r '.transitions[0].fields // empty | keys[] as $k | .[$k] | select(has("allowedValues")) | .allowedValues[] | select(has("name")) | .name' | head -1)
@@ -103,7 +107,7 @@ jobs:
           
           # Get available transitions
           echo "🔄 Getting available transitions for $JIRA_KEY..."
-          transitions_response=$(curl -s -H "Authorization: Basic ${{ secrets.JIRA_API_TOKEN }}" \
+          transitions_response=$(curl -s -H "Authorization: Basic $CREDENTIALS" \
             "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$JIRA_KEY/transitions")
           
           echo "📝 Available transitions: $transitions_response"
@@ -123,7 +127,7 @@ jobs:
           # Perform the transition
           echo "⚡ Updating Jira status..."
           result=$(curl -s -w "%{http_code}" -X POST \
-            -H "Authorization: Basic ${{ secrets.JIRA_API_TOKEN }}" \
+            -H "Authorization: Basic $CREDENTIALS" \
             -H "Content-Type: application/json" \
             -d "{\"transition\":{\"id\":\"$transition_id\"}}" \
             "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$JIRA_KEY/transitions" \
