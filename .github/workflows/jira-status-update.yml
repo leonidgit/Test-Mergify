@@ -41,8 +41,23 @@ jobs:
           echo "🔐 Testing Jira authentication..."
           echo "🔐 Testing URL: ${{ secrets.JIRA_BASE_URL }}/rest/api/2/myself"
           
-          # Create base64 encoded credentials (email:api_token) - fix for Ubuntu
-          CREDENTIALS=$(printf "%s:%s" "${{ secrets.JIRA_USER_EMAIL }}" "${{ secrets.JIRA_API_TOKEN }}" | base64 -w 0)
+          # Debug: Check what secrets are available
+          echo "🔐 Checking secrets existence..."
+          echo "JIRA_USER_EMAIL exists: ${{ secrets.JIRA_USER_EMAIL != '' }}"
+          echo "JIRA_API_TOKEN exists: ${{ secrets.JIRA_API_TOKEN != '' }}"
+          echo "JIRA_BASE_URL exists: ${{ secrets.JIRA_BASE_URL != '' }}"
+          
+          # Try different possible secret names
+          if [ -n "${{ secrets.JIRA_AUTH }}" ]; then
+            echo "🔐 Using JIRA_AUTH secret"
+            CREDENTIALS="${{ secrets.JIRA_AUTH }}"
+          elif [ -n "${{ secrets.JIRA_USER_EMAIL }}" ] && [ -n "${{ secrets.JIRA_API_TOKEN }}" ]; then
+            echo "🔐 Using JIRA_USER_EMAIL:JIRA_API_TOKEN"
+            CREDENTIALS=$(printf "%s:%s" "${{ secrets.JIRA_USER_EMAIL }}" "${{ secrets.JIRA_API_TOKEN }}" | base64 -w 0)
+          else
+            echo "❌ No valid Jira credentials found"
+            exit 1
+          fi
           
           echo "🔐 Testing with credentials..."
           auth_response=$(curl -s -H "Authorization: Basic $CREDENTIALS" \
