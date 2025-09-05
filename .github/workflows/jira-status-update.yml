@@ -7,18 +7,25 @@ on:
       - custom-qa
       - custom
       - release
+  # Add manual trigger for testing
+  workflow_dispatch:
 
 jobs:
   update-jira:
-    if: github.event.pull_request.merged == true
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Extract Jira Issue Key
         id: jira-key
         run: |
-          JIRA_KEY=$(echo "${{ github.event.pull_request.title }}" | grep -o '[A-Z]\+-[0-9]\+' | head -1)
-          if [ -z "$JIRA_KEY" ]; then
-            JIRA_KEY=$(echo "${{ github.event.pull_request.head.ref }}" | grep -o '[A-Z]\+-[0-9]\+' | head -1)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            JIRA_KEY="NO-18109"
+            echo "🧪 Manual test mode: using $JIRA_KEY"
+          else
+            JIRA_KEY=$(echo "${{ github.event.pull_request.title }}" | grep -o '[A-Z]\+-[0-9]\+' | head -1)
+            if [ -z "$JIRA_KEY" ]; then
+              JIRA_KEY=$(echo "${{ github.event.pull_request.head.ref }}" | grep -o '[A-Z]\+-[0-9]\+' | head -1)
+            fi
           fi
           echo "key=$JIRA_KEY" >> $GITHUB_OUTPUT
 
