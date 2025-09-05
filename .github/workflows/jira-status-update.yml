@@ -18,7 +18,7 @@ jobs:
         run: |
           JIRA_KEY=$(echo "${{ github.event.pull_request.title }}" | grep -o '[A-Z]\+-[0-9]\+' | head -1)
           if [ -z "$JIRA_KEY" ]; then
-            JIRA_KEY=$(echo "${{ github.event.pull_request.head.ref }}" | grep -o '[A-Z]\+-[0-9\+' | head -1)
+            JIRA_KEY=$(echo "${{ github.event.pull_request.head.ref }}" | grep -o '[A-Z]\+-[0-9]\+' | head -1)
           fi
           echo "key=$JIRA_KEY" >> $GITHUB_OUTPUT
 
@@ -27,6 +27,8 @@ jobs:
         run: |
           BRANCH="${{ github.event.pull_request.base.ref }}"
           JIRA_KEY="${{ steps.jira-key.outputs.key }}"
+          
+          echo "🔍 Processing: Branch=$BRANCH, Jira Key=$JIRA_KEY"
           
           case $BRANCH in
             "custom-qa")
@@ -40,14 +42,51 @@ jobs:
               ;;
           esac
           
-          curl -X POST \
+          echo "📋 Target status: $STATUS"
+          
+          # First, test basic authentication
+          echo "🔐 Testing Jira authentication..."
+          auth_test=$(curl -s -w "%{http_code}" -H "Authorization: Basic ${{ secrets.JIRA_AUTH_TOKEN }}" \
+            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/myself" -o /dev/null)
+          
+          if [ "$auth_test" != "200" ]; then
+            echo "❌ Authentication failed: HTTP $auth_test"
+            exit 1
+          fi
+          echo "✅ Authentication successful"
+          
+          # Get available transitions
+          echo "🔄 Getting available transitions for $JIRA_KEY..."
+          transitions_response=$(curl -s -H "Authorization: Basic ${{ secrets.JIRA_AUTH_TOKEN }}" \
+            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$JIRA_KEY/transitions")
+          
+          echo "📝 Available transitions: $transitions_response"
+          
+          # Find transition ID
+          transition_id=$(echo "$transitions_response" | jq -r ".transitions[] | select(.name==\"$STATUS\") | .id")
+          
+          if [ -z "$transition_id" ] || [ "$transition_id" = "null" ]; then
+            echo "❌ Status '$STATUS' not found in available transitions"
+            echo "Available statuses:"
+            echo "$transitions_response" | jq -r '.transitions[].name'
+            exit 1
+          fi
+          
+          echo "🎯 Found transition ID: $transition_id"
+          
+          # Perform the transition
+          echo "⚡ Updating Jira status..."
+          result=$(curl -s -w "%{http_code}" -X POST \
             -H "Authorization: Basic ${{ secrets.JIRA_AUTH_TOKEN }}" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"transition\": {
-                \"id\": \"$(curl -s -H 'Authorization: Basic ${{ secrets.JIRA_AUTH_TOKEN }}' \
-                  '${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$JIRA_KEY/transitions' | \
-                  jq -r '.transitions[] | select(.name==\"'$STATUS'\") | .id')\"
-              }
-            }" \
-            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$JIRA_KEY/transitions"
+            -d "{\"transition\":{\"id\":\"$transition_id\"}}" \
+            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$JIRA_KEY/transitions" \
+            -o /tmp/response.json)
+          
+          if [ "$result" = "204" ]; then
+            echo "✅ Successfully updated $JIRA_KEY to $STATUS"
+          else
+            echo "❌ Transition failed: HTTP $result"
+            cat /tmp/response.json
+            exit 1
+          fi
