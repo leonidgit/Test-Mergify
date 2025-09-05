@@ -41,9 +41,10 @@ jobs:
           echo "🔐 Testing Jira authentication..."
           echo "🔐 Testing URL: ${{ secrets.JIRA_BASE_URL }}/rest/api/2/myself"
           
-          # Create base64 encoded credentials (email:api_token)
-          CREDENTIALS=$(echo -n "${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }}" | base64)
+          # Create base64 encoded credentials (email:api_token) - fix for Ubuntu
+          CREDENTIALS=$(printf "%s:%s" "${{ secrets.JIRA_USER_EMAIL }}" "${{ secrets.JIRA_API_TOKEN }}" | base64 -w 0)
           
+          echo "🔐 Testing with credentials..."
           auth_response=$(curl -s -H "Authorization: Basic $CREDENTIALS" \
             "${{ secrets.JIRA_BASE_URL }}/rest/api/2/myself")
           auth_test=$(curl -s -w "%{http_code}" -H "Authorization: Basic $CREDENTIALS" \
