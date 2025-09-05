@@ -40,9 +40,9 @@ jobs:
           
           echo "📋 Project: $project_key, Current Status: $current_status"
           
-          # Check if this is for NOOSH ONE project
-          if [ "$project_key" != "NOOSH ONE" ]; then
-            echo "⚠️  Skipping: This workflow only applies to NOOSH ONE project (current: $project_key)"
+          # Check if this is for NOOSH ONE project (key: NO)
+          if [ "$project_key" != "NO" ]; then
+            echo "⚠️  Skipping: This workflow only applies to NOOSH ONE project (key: NO, current: $project_key)"
             exit 0
           fi
           
@@ -59,7 +59,7 @@ jobs:
             exit 0
           fi
           
-          echo "✅ Validated: NOOSH ONE project, non-TEST workflow"
+          echo "✅ Validated: NOOSH ONE project (key: NO), non-TEST workflow"
           
           case $BRANCH in
             "custom-qa")
