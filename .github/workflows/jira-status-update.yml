@@ -1,4 +1,4 @@
-name: Update Jira Status on PR Merge
+name: Update Jira Status on PR Merge - NO production Bugs Workflow (Noosh One)
 
 on:
   pull_request:
@@ -29,6 +29,37 @@ jobs:
           JIRA_KEY="${{ steps.jira-key.outputs.key }}"
           
           echo "🔍 Processing: Branch=$BRANCH, Jira Key=$JIRA_KEY"
+          
+          # Get issue details to check project and workflow
+          echo "🔍 Getting issue details for project and workflow validation..."
+          issue_details=$(curl -s -H "Authorization: Basic ${{ secrets.JIRA_AUTH_TOKEN }}" \
+            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$JIRA_KEY?fields=project,status")
+          
+          project_key=$(echo "$issue_details" | jq -r '.fields.project.key')
+          current_status=$(echo "$issue_details" | jq -r '.fields.status.name')
+          
+          echo "📋 Project: $project_key, Current Status: $current_status"
+          
+          # Check if this is for NOOSH ONE project
+          if [ "$project_key" != "NOOSH ONE" ]; then
+            echo "⚠️  Skipping: This workflow only applies to NOOSH ONE project (current: $project_key)"
+            exit 0
+          fi
+          
+          # Get workflow information
+          echo "🔄 Getting workflow information..."
+          workflow_info=$(curl -s -H "Authorization: Basic ${{ secrets.JIRA_AUTH_TOKEN }}" \
+            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$JIRA_KEY/transitions")
+          
+          workflow_name=$(echo "$workflow_info" | jq -r '.transitions[0].fields // empty | keys[] as $k | .[$k] | select(has("allowedValues")) | .allowedValues[] | select(has("name")) | .name' | head -1)
+          
+          # Check if workflow is TEST (exclude TEST workflow)
+          if [[ "$current_status" == *"TEST"* ]] || [[ "$workflow_name" == *"TEST"* ]]; then
+            echo "⚠️  Skipping: This workflow excludes TEST workflows (current status: $current_status)"
+            exit 0
+          fi
+          
+          echo "✅ Validated: NOOSH ONE project, non-TEST workflow"
           
           case $BRANCH in
             "custom-qa")
