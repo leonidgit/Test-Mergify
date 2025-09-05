@@ -87,8 +87,12 @@ jobs:
           
           # First, test basic authentication
           echo "🔐 Testing Jira authentication..."
+          echo "🔐 Testing URL: ${{ secrets.JIRA_BASE_URL }}/rest/api/2/myself"
+          auth_response=$(curl -s -H "Authorization: Basic ${{ secrets.JIRA_API_TOKEN }}" \
+            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/myself")
           auth_test=$(curl -s -w "%{http_code}" -H "Authorization: Basic ${{ secrets.JIRA_API_TOKEN }}" \
             "${{ secrets.JIRA_BASE_URL }}/rest/api/2/myself" -o /dev/null)
+          echo "🔐 Auth response: $auth_response"
           
           if [ "$auth_test" != "200" ]; then
             echo "❌ Authentication failed: HTTP $auth_test"
