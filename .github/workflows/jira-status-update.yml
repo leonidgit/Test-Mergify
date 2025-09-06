@@ -87,13 +87,13 @@ jobs:
           
           echo "Available transitions: $transitions_response"
           
-          # Find transition ID
-          transition_id=$(echo "$transitions_response" | jq -r ".transitions[] | select(.name==\"$STATUS\") | .id")
+          # Find transition ID - match by destination status name, not transition name
+          transition_id=$(echo "$transitions_response" | jq -r ".transitions[] | select(.to.name==\"$STATUS\") | .id")
           
           if [ -z "$transition_id" ] || [ "$transition_id" = "null" ]; then
             echo "Status '$STATUS' not found in available transitions"
             echo "Available statuses:"
-            echo "$transitions_response" | jq -r '.transitions[].name'
+            echo "$transitions_response" | jq -r '.transitions[].to.name'
             exit 1
           fi
           
