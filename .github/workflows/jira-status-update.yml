@@ -35,50 +35,20 @@ jobs:
           
           echo "Processing: $JIRA_KEY for branch $BRANCH"
           
-          # Test different authentication methods
-          echo "Testing Jira authentication methods..."
-          
-          # Method 1: JIRA_USER_EMAIL:JIRA_API_TOKEN
-          echo "Method 1: email:token"
-          auth_test1=$(curl -s -w "%{http_code}" $AUTH_METHOD \
+          # Test authentication with JIRA_AUTH_TOKEN
+          echo "Testing Jira authentication..."
+          auth_test=$(curl -s -w "%{http_code}" -u "${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_AUTH_TOKEN }}" \
             "${{ secrets.JIRA_BASE_URL }}/rest/api/2/myself" -o /dev/null)
-          echo "Method 1 result: $auth_test1"
           
-          # Method 2: Check if JIRA_TOKEN exists (different name)
-          if [ -n "${{ secrets.JIRA_TOKEN }}" ]; then
-            echo "Method 2: email:JIRA_TOKEN"
-            auth_test2=$(curl -s -w "%{http_code}" -u "${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_TOKEN }}" \
-              "${{ secrets.JIRA_BASE_URL }}/rest/api/2/myself" -o /dev/null)
-            echo "Method 2 result: $auth_test2"
-          fi
-          
-          # Method 3: Check if JIRA_EMAIL exists (different name)
-          if [ -n "${{ secrets.JIRA_EMAIL }}" ]; then
-            echo "Method 3: JIRA_EMAIL:token"
-            auth_test3=$(curl -s -w "%{http_code}" -u "${{ secrets.JIRA_EMAIL }}:${{ secrets.JIRA_API_TOKEN }}" \
-              "${{ secrets.JIRA_BASE_URL }}/rest/api/2/myself" -o /dev/null)
-            echo "Method 3 result: $auth_test3"
-          fi
-          
-          # Use the working method
-          if [ "$auth_test1" = "200" ]; then
-            echo "Using Method 1"
-            AUTH_METHOD="-u ${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }}"
-          elif [ -n "${{ secrets.JIRA_TOKEN }}" ] && [ "$auth_test2" = "200" ]; then
-            echo "Using Method 2"
-            AUTH_METHOD="-u ${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_TOKEN }}"
-          elif [ -n "${{ secrets.JIRA_EMAIL }}" ] && [ "$auth_test3" = "200" ]; then
-            echo "Using Method 3"
-            AUTH_METHOD="-u ${{ secrets.JIRA_EMAIL }}:${{ secrets.JIRA_API_TOKEN }}"
-          else
-            echo "All authentication methods failed"
+          if [ "$auth_test" != "200" ]; then
+            echo "Authentication failed: HTTP $auth_test"
             exit 1
           fi
           
           echo "Authentication successful"
           
           # Get issue details
-          issue_response=$(curl -s $AUTH_METHOD \
+          issue_response=$(curl -s -u "${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_AUTH_TOKEN }}" \
             "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$JIRA_KEY?fields=project,status")
           
           echo "Issue response: $issue_response"
@@ -91,6 +61,8 @@ jobs:
             exit 0
           fi
           
+          echo "Project validated: $project_key"
+          
           # Set status based on branch
           case $BRANCH in
             "custom-qa")
@@ -102,27 +74,43 @@ jobs:
             "release")
               STATUS="FIXED IN STAGE"
               ;;
+            *)
+              STATUS="FIXED IN STAGE"
+              ;;
           esac
           
           echo "Target status: $STATUS"
           
           # Get available transitions
-          transitions_response=$(curl -s $AUTH_METHOD \
+          transitions_response=$(curl -s -u "${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_AUTH_TOKEN }}" \
             "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$JIRA_KEY/transitions")
+          
+          echo "Available transitions: $transitions_response"
           
           # Find transition ID
           transition_id=$(echo "$transitions_response" | jq -r ".transitions[] | select(.name==\"$STATUS\") | .id")
           
           if [ -z "$transition_id" ] || [ "$transition_id" = "null" ]; then
-            echo "Status '$STATUS' not found"
+            echo "Status '$STATUS' not found in available transitions"
+            echo "Available statuses:"
+            echo "$transitions_response" | jq -r '.transitions[].name'
             exit 1
           fi
           
+          echo "Found transition ID: $transition_id"
+          
           # Perform transition
-          curl -X POST \
-            $AUTH_METHOD \
+          result=$(curl -s -w "%{http_code}" -X POST \
+            -u "${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_AUTH_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d "{\"transition\":{\"id\":\"$transition_id\"}}" \
-            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$JIRA_KEY/transitions"
+            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$JIRA_KEY/transitions" \
+            -o /tmp/response.json)
           
-          echo "Successfully updated $JIRA_KEY to $STATUS"
+          if [ "$result" = "204" ]; then
+            echo "Successfully updated $JIRA_KEY to $STATUS"
+          else
+            echo "Transition failed: HTTP $result"
+            cat /tmp/response.json
+            exit 1
+          fi
