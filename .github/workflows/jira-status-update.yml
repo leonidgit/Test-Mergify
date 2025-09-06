@@ -1,4 +1,4 @@
-name: Update Jira Status on PR Merge
+name: Jira Integration
 
 on:
   pull_request:
