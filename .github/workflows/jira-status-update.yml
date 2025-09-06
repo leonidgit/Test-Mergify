@@ -36,12 +36,21 @@ jobs:
           echo "Processing: $JIRA_KEY for branch $BRANCH"
           
           # Test authentication
-          curl -u "${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }}" \
-            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/myself"
+          echo "Testing Jira authentication..."
+          auth_test=$(curl -s -w "%{http_code}" -u "${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }}" \
+            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/myself" -o /dev/null)
+          
+          if [ "$auth_test" != "200" ]; then
+            echo "Authentication failed: HTTP $auth_test"
+            exit 1
+          fi
+          echo "Authentication successful"
           
           # Get issue details
           issue_response=$(curl -s -u "${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }}" \
             "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$JIRA_KEY?fields=project,status")
+          
+          echo "Issue response: $issue_response"
           
           project_key=$(echo "$issue_response" | jq -r '.fields.project.key')
           
